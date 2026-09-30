@@ -28,6 +28,8 @@ pub struct ArbitrageService {
     pub matched_markets: Vec<MatchedMarket>,
     /// Performance metrics
     pub metrics: Arc<PerformanceMetrics>,
+    /// 只监控不下单
+    pub monitor_only: bool,
 }
 
 impl ArbitrageService {
@@ -82,6 +84,7 @@ impl ArbitrageService {
             matched_events: Vec::new(),
             matched_markets: Vec::new(),
             metrics,
+            monitor_only: config.monitor_only,
         })
     }
 
@@ -228,6 +231,9 @@ impl ArbitrageService {
         count: i32,
         price: i32,
     ) -> Result<serde_json::Value> {
+        if self.monitor_only {
+            anyhow::bail!("监控模式，已禁止下单");
+        }
         self.kalshi_client
             .place_order(ticker, side, outcome, count, price)
             .await
@@ -240,6 +246,9 @@ impl ArbitrageService {
         side: &str,
         amount: f64,
     ) -> Result<serde_json::Value> {
+        if self.monitor_only {
+            anyhow::bail!("监控模式，已禁止下单");
+        }
         self.polymarket_client
             .place_market_order(token_id, side, amount)
             .await
@@ -253,6 +262,9 @@ impl ArbitrageService {
         side: &str,
         tokens: f64,
     ) -> Result<serde_json::Value> {
+        if self.monitor_only {
+            anyhow::bail!("监控模式，已禁止下单");
+        }
         self.polymarket_client
             .place_market_order_by_tokens(token_id, side, tokens)
             .await

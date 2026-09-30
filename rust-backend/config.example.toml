@@ -1,6 +1,9 @@
 # Polytaoli - 预测市场套利程序配置文件
 # 这是配置文件模板，请复制为 config.toml 并填入你的实际凭据
 
+# 只监控不下单（true = 不自动下单，所有下单请求直接拒绝）
+monitor_only = true
+
 [kalshi]
 # Kalshi API Key（从 https://kalshi.com/profile/api 获取）
 api_key = "your-kalshi-api-key-here"

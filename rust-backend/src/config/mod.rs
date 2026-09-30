@@ -202,6 +202,9 @@ impl Default for TelegramConfig {
 /// Main configuration struct
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
+    /// 只监控不下单：为 true 时不启动自动下单，所有下单调用直接拒绝
+    #[serde(default)]
+    pub monitor_only: bool,
     pub kalshi: KalshiConfig,
     pub polymarket: PolymarketConfig,
     #[serde(default)]
