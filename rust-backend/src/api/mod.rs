@@ -193,67 +193,71 @@ pub async fn create_app(config: Config) -> Result<Router> {
         }
     });
 
-    // Spawn auto-trade queue checker (every 200ms for faster response)
-    let state_for_queue = state.clone();
-    let metrics_for_queue = metrics.clone();
-    tokio::spawn(async move {
-        info!("📋 自动下单队列检查任务启动，间隔 200ms");
+    if config.monitor_only {
+        info!("👀 监控模式：自动下单已禁用，不会下任何单");
+    } else {
+        // Spawn auto-trade queue checker (every 200ms for faster response)
+        let state_for_queue = state.clone();
+        let metrics_for_queue = metrics.clone();
+        tokio::spawn(async move {
+            info!("📋 自动下单队列检查任务启动，间隔 200ms");
         
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200));
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200));
         
-        loop {
-            interval.tick().await;
+            loop {
+                interval.tick().await;
             
-            // Check and add opportunities to queue
-            check_and_queue_auto_trade(&state_for_queue, &metrics_for_queue).await;
-        }
-    });
+                // Check and add opportunities to queue
+                check_and_queue_auto_trade(&state_for_queue, &metrics_for_queue).await;
+            }
+        });
 
-    // Spawn auto-trade executor (processes queue with 1s interval)
-    let state_for_executor = state.clone();
-    let metrics_for_executor = metrics.clone();
-    tokio::spawn(async move {
-        info!("🚀 自动下单执行器启动，机会间隔 1 秒");
+        // Spawn auto-trade executor (processes queue with 1s interval)
+        let state_for_executor = state.clone();
+        let metrics_for_executor = metrics.clone();
+        tokio::spawn(async move {
+            info!("🚀 自动下单执行器启动，机会间隔 1 秒");
         
-        loop {
-            let service = state_for_executor.service.read().await;
+            loop {
+                let service = state_for_executor.service.read().await;
             
-            // Check if already executing
-            if service.ws_manager.is_auto_trading.load(std::sync::atomic::Ordering::Relaxed) {
-                drop(service);
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                continue;
+                // Check if already executing
+                if service.ws_manager.is_auto_trading.load(std::sync::atomic::Ordering::Relaxed) {
+                    drop(service);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    continue;
+                }
+            
+                // Get next opportunity from queue
+                let key = {
+                    let mut queue = service.ws_manager.auto_trade_queue.write();
+                    queue.pop_front()
+                };
+            
+                if let Some(key) = key {
+                    // Mark as executing
+                    service.ws_manager.is_auto_trading.store(true, std::sync::atomic::Ordering::Relaxed);
+                
+                    info!("🎯 [自动下单执行器] 开始处理: {}", key);
+                
+                    // Execute the opportunity
+                    execute_single_auto_trade(&service, &state_for_executor, &metrics_for_executor, &key).await;
+                
+                    // Mark as done
+                    service.ws_manager.is_auto_trading.store(false, std::sync::atomic::Ordering::Relaxed);
+                
+                    drop(service);
+                
+                    info!("⏱️  [自动下单执行器] 等待 1 秒后处理下一个机会");
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                } else {
+                    // Queue empty, wait a bit
+                    drop(service);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
             }
-            
-            // Get next opportunity from queue
-            let key = {
-                let mut queue = service.ws_manager.auto_trade_queue.write();
-                queue.pop_front()
-            };
-            
-            if let Some(key) = key {
-                // Mark as executing
-                service.ws_manager.is_auto_trading.store(true, std::sync::atomic::Ordering::Relaxed);
-                
-                info!("🎯 [自动下单执行器] 开始处理: {}", key);
-                
-                // Execute the opportunity
-                execute_single_auto_trade(&service, &state_for_executor, &metrics_for_executor, &key).await;
-                
-                // Mark as done
-                service.ws_manager.is_auto_trading.store(false, std::sync::atomic::Ordering::Relaxed);
-                
-                drop(service);
-                
-                info!("⏱️  [自动下单执行器] 等待 1 秒后处理下一个机会");
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            } else {
-                // Queue empty, wait a bit
-                drop(service);
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-        }
-    });
+        });
+    }
 
     // Spawn ended market cleanup task (every 60 seconds)
     let state_for_cleanup = state.clone();
